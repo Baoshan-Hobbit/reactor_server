@@ -1,0 +1,51 @@
+1. 单线程reactor server的工作流程
+  
+  server端:
+  1) 创建epoll
+  2) 创建listen socket,注册进epoll
+  3) 死循环使用epoll检测就绪的socket
+  4) 若listen socket可读,调用accept创建connect socket,注册进epoll  
+     若connect socket可读,调用业务逻辑函数,业务逻辑中使用recv
+     若connect socket可写,调用业务逻辑函数,业务逻辑中使用send
+
+  client端:
+  1) 创建socket
+  2) 发起连接请求
+  3) 连接成功,返回 connect socket
+  4) 调用send发起业务请求
+  4) 若connect socket可读,调用recv执行业务逻辑
+
+  + socket 是文件描述符,与端口数没有映射关系
+  + 一个TCP连接在client端和server端都有一个socket,抽象各自的网卡
+  + socket与thread的功能类似,只负责干活,不关心怎么干
+    业务逻辑即相当于线程池中的task,封装了一个任务需要的数据和处理的方式,
+    socket收到数据后执行业务逻辑与thread获取task后执行任务没哟区别
+    这种先定义好函数然后交给另一方,另一方在某个条件触发后开始执行的模式为回调
+    回调的特征是事件驱动,可以完成驱动代码和任务代码的解耦
+
+  linux socket的接口:
+	int m_socket = socket(AF_INET, SOCK_STREAM, 0);
+	close(m_socket);
+
+  int ret = ::bind(m_socket, (sockaddr*)&serv_addr, sizeof(serv_addr));
+	ret = listen(m_socket, 64);
+	fd = accept(m_socket, (sockaddr*)&peer_addr, &addr_len))
+	int ret = connect(m_socket, (sockaddr*)&serv_addr, sizeof(serv_addr));
+
+	int ret = send(m_socket, (char*)buf, len, 0);
+	return recv(m_socket, (char*)buf, len, 0);
+
+  getsockopt(m_socket, SOL_SOCKET, SO_ERROR, (char*)&error, &len);
+	int ret = setsockopt(m_socket, SOL_SOCKET, SO_SNDBUF, &send_size, 4);
+	int ret = setsockopt(m_socket, SOL_SOCKET, SO_RCVBUF, &recv_size, 4);
+	int ret = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
+	int ret = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, sizeof(nodelay));
+	int ret = fcntl(fd, F_SETFL, O_NONBLOCK | fcntl(fd, F_GETFL));
+
+  linux epoll的接口:
+	m_epfd = epoll_create(1024);
+	close(m_epfd);
+
+	if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &ev) != 0)
+  nfds = epoll_wait(m_epfd, events, 1024, wait_timeout);
+  EPOLLIN, EPOLLOUT, EPOLLHUP, EPOLLERR, EPOLLPRI
