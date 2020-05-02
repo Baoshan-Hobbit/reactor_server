@@ -8,9 +8,16 @@
 #include "src/socket.h"
 
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/ioctl.h>
 #include <unistd.h> // fcntl()
+#include <fcntl.h> // fcntl
 #include <arpa/inet.h> // ntohl()
+#include <netinet/in.h> // sockaddr_in
+#include <netinet/tcp.h> // TCP_NODELAY
 #include <stdio.h>
+#include <string.h> // memset()
+#include <memory>
 
 #include "src/dispatcher.h"
 #include "src/types.h"
@@ -20,7 +27,7 @@ Socket::Socket() : socket_fd_(INVALID_SOCKET), state_(IDLE),
   callback_(nullptr) {}
 
 int Socket::Listen(const IP& server_ip, PORT server_port, 
-    CallbackWrapper* callback) {
+    std::shared_ptr<CallbackWrapper> callback) {
   server_ip_ = server_ip;
   server_port_ = server_port;
   callback_ = callback;
@@ -38,7 +45,7 @@ int Socket::Listen(const IP& server_ip, PORT server_port,
     return NETLIB_ERROR;
   }
 
-  int ret = SetNonblock();
+  ret = SetNonBlock();
   if (ret == SOCKET_ERROR) {
     printf("set non-block failed, error code: %d\n", GetErrorCode());
     Close();
@@ -47,7 +54,7 @@ int Socket::Listen(const IP& server_ip, PORT server_port,
 
   sockaddr_in server_addr;
   SetAddr(&server_addr);
-  int ret = bind(socket_fd_, (sockaddr*)&server_addr, sizeof(server_addr));
+  ret = bind(socket_fd_, (sockaddr*)&server_addr, sizeof(server_addr));
   if (ret == SOCKET_ERROR) {
     printf("bind failed, error code: %d\n", GetErrorCode());
     Close();
@@ -55,7 +62,7 @@ int Socket::Listen(const IP& server_ip, PORT server_port,
   }
 
   int backlog = 64;
-  int ret = listen(socket_fd_, backlog);
+  ret = listen(socket_fd_, backlog);
   // 禁用异常时,事务性调用外部接口不可避免使用错误码,
   // 且需要手动传递错误到上层
   // 增加很多与业务逻辑无关的判断
@@ -72,12 +79,13 @@ int Socket::Listen(const IP& server_ip, PORT server_port,
   //TODO: Register
   Dispatcher& dispatcher = Dispatcher::GetInstance();
   dispatcher.AddEvent(socket_fd_);
-  dispatcher.RegisterSocket(socket_fd_, this);
+  std::shared_ptr<Socket> this_socket(this);
+  dispatcher.RegisterSocket(socket_fd_, this_socket);
   return ret;
 }
 
 int Socket::Connect(const IP& server_ip, PORT server_port, 
-    CallbackWrapper* callback) {
+    std::shared_ptr<CallbackWrapper> callback) {
   server_ip_ = server_ip;
   server_port_ = server_port;
   callback_ = callback;
@@ -95,7 +103,7 @@ int Socket::Connect(const IP& server_ip, PORT server_port,
     return NETLIB_ERROR;
   }
 
-  int ret = SetNonblock();
+  ret = SetNonBlock();
   if (ret == SOCKET_ERROR) {
     printf("set non-block failed, error code: %d\n", GetErrorCode());
     Close();
@@ -104,52 +112,67 @@ int Socket::Connect(const IP& server_ip, PORT server_port,
 
   sockaddr_in server_addr;
   SetAddr(&server_addr);
-  int ret = connect(socket_fd_, (sockaddr*)&server_addr, sizeof(server_addr));
+  ret = connect(socket_fd_, (sockaddr*)&server_addr, sizeof(server_addr));
   if (ret == SOCKET_ERROR) {
     int err_code = GetErrorCode();
-    // 连接暂时阻塞,认为连接正常,返回0
-    // 连接错误,直接返回
     if (IsBlock(err_code)) {
       ret = 0;
     } else {
       printf("connect failed, error code: %d\n", err_code);
-      CLose();
+      Close();
       return NETLIB_ERROR;
     }
   }
   state_ = CONNECTING;
-  printf("connected to %s:%d\n", server_ip_.c_str(), server_port_);
+  printf("connecting to %s:%d\n", server_ip_.c_str(), server_port_);
 
   Dispatcher& dispatcher = Dispatcher::GetInstance();
   dispatcher.AddEvent(socket_fd_);
-  dispatcher.RegisterSocket(socket_fd_, this);
+  std::shared_ptr<Socket> this_socket(this);
+  dispatcher.RegisterSocket(socket_fd_, this_socket);
 
   return ret;
 }
 
+// 为什么被调用两次?
 void Socket::Close() {
+  state_ = CLOSING;
+  Dispatcher& dispatcher = Dispatcher::GetInstance();
+  if (dispatcher.FindSocket(socket_fd_)) {
+    //printf("socket found, to close\n");
+    dispatcher.RemoveEvent(socket_fd_);
+    dispatcher.UnregisterSocket(socket_fd_); 
+  } 
+  //else {
+  //  printf("socket not found, to close\n");
+  //}
   close(socket_fd_);
+  printf("socket: %d closed.\n", socket_fd_);
 }
 
-int Socket::Send(void* buf, int len) {
+int Socket::Send(const void* buf, int len) {
   if (state_ != CONNECTED)
-    return ETLIB_ERROR;
+    return NETLIB_ERROR;
   int ret = write(socket_fd_, (char*)buf, len);
-  if (ret == SOCKET_ERROR) {
-    int err_code = GetErrorCode();
-    // 发送暂时阻塞,认为发送正常,返回0
-    // 发送错误,log,返回-1
-    if (IsBlock(err_code)) {
-      ret = 0;
-    } else {
-      printf("send failed, error code: %d\n", err_code);
-    }
-  }
+  //if (ret == SOCKET_ERROR) {
+    //int err_code = GetErrorCode();
+    //if (IsBlock(err_code)) {
+    //  ret = 0;
+    //} else {
+    //  printf("send failed, error code: %d\n", err_code);
+    //}
+  //}
+  if (ret == SOCKET_ERROR && !IsBlock(GetErrorCode()))
+    printf("send failed, error code: %d\n", GetErrorCode());
   return ret; 
 }
 
 int Socket::Recv(void* buf, int len) {
+  if (state_ != CONNECTED)
+    return NETLIB_ERROR;
   int ret = read(socket_fd_, buf, len);
+  if (ret == SOCKET_ERROR && !IsBlock(GetErrorCode()))
+    printf("recv failed, error code: %d\n", GetErrorCode());
   return ret;
 }
 
@@ -158,9 +181,10 @@ void Socket::OnRead() {
     Accept();
   } else {
     u_long avail = 0;
-    // 已连接套接字可读还不行,得看有没有错误,能读的有多少?
-    if ((ioctlsocket(m_socket, FIONREAD, &avail) == SOCKET_ERROR) || 
-        (avail == 0)) {
+    //if ((ioctl(socket_fd_, FIONREAD, &avail) == SOCKET_ERROR) || (avail == 0)) {
+    ioctl(socket_fd_, FIONREAD, &avail);
+    if (avail == 0) {
+      printf("onread detect close\n");
       callback_->Run(socket_fd_, NETLIB_MSG_CLOSE);   
     } else {
       callback_->Run(socket_fd_, NETLIB_MSG_READ); 
@@ -172,12 +196,13 @@ void Socket::OnWrite() {
   if (state_ == CONNECTING) {
     int err = 0;
     socklen_t len = sizeof(err);
-    // 正在建立连接的套接字可写还不行,得看有没有错误?
     getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
     if (err) {
+      printf("second connecting failed.\n");
       callback_->Run(socket_fd_, NETLIB_MSG_CLOSE);
     } else {
       state_ = CONNECTED;
+      printf("connected to %s:%d\n", server_ip_.c_str(), server_port_);
       callback_->Run(socket_fd_, NETLIB_MSG_CONFIRM);
     }
   } else {
@@ -186,11 +211,8 @@ void Socket::OnWrite() {
 }
 
 void Socket::OnClose() {
-  state_ = CLOSING;
+  printf("socket onclose\n");
   callback_->Run(socket_fd_, NETLIB_MSG_CLOSE);
-  Dispatcher& dispatcher = Dispatcher::GetInstance();
-  dispatcher.RemoveEvent(socket_fd_);
-  dispatcher.UnregisterSocket(socket_fd_);
 }
 
 void Socket::Accept() {
@@ -204,14 +226,15 @@ void Socket::Accept() {
     uint16_t client_port = ntohs(client_addr.sin_port);
     snprintf(client_ip, sizeof(client_ip), "%d.%d.%d.%d", ip>>24, (ip>>16)&0xFF, 
        (ip>>8)&0xFF, ip&0xFF);
-    printf("accept conn, socket fd=%d from %s:%d\n", fd, client_ip, 
+    printf("accept conn, socket fd=%d from %s:%d\n", conn_fd, client_ip, 
         client_port);
 
-    Socket* conn_socket = new Socket();
+    // bug, no delete
+    std::shared_ptr<Socket> conn_socket = std::make_shared<Socket>();
 
     conn_socket->set_socket_fd(conn_fd);
     conn_socket->set_state(CONNECTED);
-    conn_socket->set_callback(callback_);
+    //conn_socket->set_callback(callback_);
 
     conn_socket->set_client_ip(client_ip);
     conn_socket->set_client_port(client_port);
@@ -220,10 +243,10 @@ void Socket::Accept() {
     conn_socket->SetNonBlock();
 
     Dispatcher& dispatcher = Dispatcher::GetInstance();
-    Dispatcher.AddSocketfd(conn_fd);
-    Dispatcher.RegisterSocket(conn_fd, conn_socket);
+    dispatcher.AddEvent(conn_fd);
+    dispatcher.RegisterSocket(conn_fd, conn_socket);
 
-    callback_->Run(conn_socket, NETLIB_MSG_CONNECT); 
+    callback_->Run(conn_fd, NETLIB_MSG_CONNECT); 
  }
 }
 
@@ -235,20 +258,16 @@ int Socket::SetReuseAddr() {
 }
 
 int Socket::SetNonBlock() {
-	int ret = fcntl(socket_fd_, F_SETFL, O_NONBLOCK | fcntl(fd, F_GETFL));
+	int ret = fcntl(socket_fd_, F_SETFL, O_NONBLOCK | fcntl(socket_fd_, F_GETFL));
   return ret;
 }
 
-int SOcket::SetNonDelay() {
+int Socket::SetNonDelay() {
   int nodelay = 1;
 	int ret = setsockopt(socket_fd_, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, 
       sizeof(nodelay));
   return ret;
 }
-
-bool IsBlock(int errno) {
-  return (errno == EINPROGRESS) || (errno == EWOULDBLOCK);
-} 
 
 void Socket::SetAddr(sockaddr_in* addr) {
   // 只声明未定义,addr指向的内存数据是不确定的,需要清空后赋值
