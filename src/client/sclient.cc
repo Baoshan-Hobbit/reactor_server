@@ -9,14 +9,15 @@
 #include <src/types.h>
 #include <string.h>
 #include <memory>
+#include <string>
 
-#include "src/socket.h"
-#include "src/dispatcher.h"
+#include "src/simple_reactor/socket.h"
+#include "src/simple_reactor/dispatcher.h"
 #include "src/types.h"
 #include "src/macro.h"
 #include "src/utils.h"
-#include "src/conn.h"
-#include "src/conn_manager.h"
+#include "src/simple_reactor/conn.h"
+#include "src/simple_reactor/conn_manager.h"
 
 class ClientConn : public Conn {
  public:
@@ -27,10 +28,10 @@ class ClientConn : public Conn {
   DISALLOW_COPY_AND_ASSIGN(ClientConn);
 
  private:
-  void HandleRequest() override { 
+  void HandleRequest(const std::string& request) override { 
     printf("sclient handle request, maybe transfer request\n"); 
   }
-  void HandleResponse() override { 
+  void HandleResponse(const std::string& response) override { 
       printf("sclient handle response, maybe transfer response\n"); 
   }
 };
@@ -39,7 +40,7 @@ void ClientConn::OnRead() {
   std::shared_ptr<Socket> socket = GetSocket(socket_fd_);
   if (!socket)
     return;
-  char temp[MAX_SOCKET_BUF_SIZE];
+  uint8_t temp[MAX_SOCKET_BUF_SIZE];
   while (true) {
     memset(temp, 0, MAX_SOCKET_BUF_SIZE);
     // ret不一定等于期望读取的字节数
@@ -48,18 +49,25 @@ void ClientConn::OnRead() {
       break;
     in_buffer_->Write(temp, ret);
   }
-  // printf遇'\0'停止,对于存储在in_buffer_中多个以'\0'结尾的字符串,只能
-  // 读出一个
-  printf("recv: %s\n", in_buffer_->get_buffer());
-  printf("recv size: %d\n", in_buffer_->get_offset());
+
+  int content_len = in_buffer_->get_offset();
+    if (content_len == 0)
+      return;
+
+  uint8_t response_buf[content_len + 1];
+  memset(response_buf, 0, sizeof(response_buf));
+  int ret = in_buffer_->ReadOut(response_buf, content_len);
+
+  std::string response_content((const char*)response_buf);
+  printf("response: %s, size: %d\n", response_content.c_str(), (int)response_content.size());
   
   MSG_SOURCE source = FROM_SERVER;
   switch (source) {
     case FROM_CLIENT: 
-      HandleRequest();
+      HandleRequest(response_content);
       break;
     case FROM_SERVER:
-      HandleResponse();
+      HandleResponse(response_content);
       break;
     default:
       break;
@@ -138,8 +146,8 @@ void ConnectCallback(void* callback_data, SOCKET socket_fd, MSG_TYPE type) {
 
     // connect成功后发送request不必须
     char request[2048] = "zzzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguo";
-    printf("request len: %d\n", (int)strlen(request)+1);
-    client_conn->Send(request, strlen(request)+1);  
+    printf("request len: %d\n", (int)strlen(request));
+    client_conn->Send((uint8_t*)request, strlen(request));  
   } else if (type == NETLIB_MSG_CLOSE) {
       std::shared_ptr<Socket> socket = GetSocket(socket_fd);
       if (socket)

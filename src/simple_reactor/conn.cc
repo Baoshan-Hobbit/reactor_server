@@ -5,12 +5,12 @@
   > Created Time: 2020年04月29日 星期三 12时32分38秒
  ************************************************************************/
 
-#include "src/conn.h"
+#include "src/simple_reactor/conn.h"
 #include <stdio.h>
 #include <string.h>
 #include <memory>
-#include "src/socket.h"
-#include "dispatcher.h"
+#include "src/simple_reactor/socket.h"
+#include "src/simple_reactor/dispatcher.h"
 #include "src/utils.h"
 
 std::shared_ptr<Socket> GetSocket(SOCKET socket_fd) {
@@ -22,7 +22,7 @@ std::shared_ptr<Socket> GetSocket(SOCKET socket_fd) {
 // 通过socket发送消息
 // 目标: 尽可能的发送,要么将out_buffer_中的数据发送完,要么发送不完,等待下次再发送
 // 本质上是读取out_buffer,允许读取不完
-int Conn::Send(const char* data, int len) {
+int Conn::Send(const uint8_t* data, int len) {
   if (is_busy_) {
     out_buffer_->Write(data, len);
     printf("busy, write to buffer.\n");
@@ -59,7 +59,7 @@ void Conn::OnWrite() {
   std::shared_ptr<Socket> socket = GetSocket(socket_fd_);
   if (!socket)
     return;
-  char temp[MAX_SOCKET_BUF_SIZE];
+  uint8_t temp[MAX_SOCKET_BUF_SIZE];
   while (out_buffer_->get_offset() > 0) {
     memset(temp, 0, MAX_SOCKET_BUF_SIZE);
     printf("onwrite executed\n");

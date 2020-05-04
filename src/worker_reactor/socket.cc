@@ -2,10 +2,10 @@
   > File Name: socket.cc
   > Author: baoshan
   > Mail: baoshanw@foxmail.com 
-  > Created Time: 2020年04月21日 星期二 18时03分51秒
+  > Created Time: 2020年05月02日 星期六 16时59分58秒
  ************************************************************************/
 
-#include "src/socket.h"
+#include "src/worker_reactor/socket.h"
 
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -19,7 +19,7 @@
 #include <string.h> // memset()
 #include <memory>
 
-#include "src/dispatcher.h"
+#include "src/worker_reactor/dispatcher.h"
 #include "src/types.h"
 #include "src/utils.h"
 
@@ -150,10 +150,10 @@ void Socket::Close() {
   printf("socket: %d closed.\n", socket_fd_);
 }
 
-int Socket::Send(const void* buf, int len) {
+int Socket::Send(const uint8_t* buf, int len) {
   if (state_ != CONNECTED)
     return NETLIB_ERROR;
-  int ret = write(socket_fd_, (char*)buf, len);
+  int ret = write(socket_fd_, buf, len);
   //if (ret == SOCKET_ERROR) {
     //int err_code = GetErrorCode();
     //if (IsBlock(err_code)) {
@@ -167,7 +167,7 @@ int Socket::Send(const void* buf, int len) {
   return ret; 
 }
 
-int Socket::Recv(void* buf, int len) {
+int Socket::Recv(uint8_t* buf, int len) {
   if (state_ != CONNECTED)
     return NETLIB_ERROR;
   int ret = read(socket_fd_, buf, len);
@@ -196,7 +196,7 @@ void Socket::OnWrite() {
   if (state_ == CONNECTING) {
     int err = 0;
     socklen_t len = sizeof(err);
-    getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
+    getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, &err, &len);
     if (err) {
       printf("second connecting failed.\n");
       callback_->Run(socket_fd_, NETLIB_MSG_CLOSE);
@@ -219,7 +219,7 @@ void Socket::Accept() {
   SOCKET conn_fd = 0;
   sockaddr_in client_addr;
   socklen_t addr_len = sizeof(sockaddr_in);
-  char client_ip[64];
+  char client_ip[16];
   while ((conn_fd = accept(socket_fd_, (sockaddr*)&client_addr, &addr_len)) != 
       INVALID_SOCKET) {
     uint32_t ip = ntohl(client_addr.sin_addr.s_addr);
@@ -252,7 +252,7 @@ void Socket::Accept() {
 
 int Socket::SetReuseAddr() {
   int reuse = 1;
-  int ret = setsockopt(socket_fd_, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, 
+  int ret = setsockopt(socket_fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, 
       sizeof(reuse));
   return ret;
 }
@@ -264,7 +264,7 @@ int Socket::SetNonBlock() {
 
 int Socket::SetNonDelay() {
   int nodelay = 1;
-	int ret = setsockopt(socket_fd_, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, 
+	int ret = setsockopt(socket_fd_, IPPROTO_TCP, TCP_NODELAY, &nodelay, 
       sizeof(nodelay));
   return ret;
 }

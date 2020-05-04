@@ -10,6 +10,8 @@
 
 #include "src/types.h"
 #include "src/macro.h"
+#include <string>
+#include <string.h>
 
 //不宜将所有的辅助函数或辅助类都放入utils.h中,要避免两个头文件双向依赖,如若将GetSocket()放入utils.h,则socket.h和utils.h双向依赖
 //
@@ -37,7 +39,10 @@ inline bool IsBlock(int error_code) {
 
 class Buffer {
  public:
-  Buffer(int capacity) : capacity_(capacity), write_offset_(0), buffer_(nullptr) { buffer_ = new char[capacity_]; }
+  Buffer(int capacity) : capacity_(capacity), write_offset_(0), buffer_(nullptr) { 
+    buffer_ = new uint8_t[capacity_]; 
+    memset(buffer_, 0, capacity_);
+  }
   ~Buffer() {
     if (buffer_) {
       free(buffer_);
@@ -46,10 +51,10 @@ class Buffer {
   }
   DISALLOW_COPY_AND_ASSIGN(Buffer);
 
-  int ReadOut(char* buf, int len);
-  int Read(char* buf, int len);
-  int Write(const char* data, int len);
-  char* get_buffer() { return buffer_; }
+  int ReadOut(uint8_t* buf, int len);
+  int Read(uint8_t* buf, int len);
+  int Write(const uint8_t* data, int len);
+  uint8_t* get_buffer() const { return buffer_; }
   //char* GetOffset() { return buffer_ + write_offset_; }
   int get_offset() { return write_offset_; }
   //int get_capacity() { return capacity_; }
@@ -59,11 +64,23 @@ class Buffer {
 
  private:
   int capacity_;
-  char* buffer_;
+  uint8_t* buffer_;
   int write_offset_;
 // TODO: 扩容,环形缓冲区
 // 扩容的方式: new,copy,delete; vector; streambuf? 
 };
 
 const int MAX_SOCKET_BUF_SIZE = 8;
+
+class RequestTaskData {
+ public:
+  RequestTaskData(SOCKET socket_fd, const std::string& request): socket_fd_(socket_fd), request_(request) {}
+  SOCKET get_socketfd() { return socket_fd_; }
+  std::string get_request() const { return request_; }
+
+ private:
+  SOCKET socket_fd_;
+  std::string request_;
+};
+
 #endif // REACTOR_SERVER_UTILS_H_

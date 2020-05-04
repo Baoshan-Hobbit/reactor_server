@@ -39,8 +39,8 @@ class Socket {
       std::shared_ptr<CallbackWrapper> callback); 
   void Close();
 
-  int Send(const void* buf, int len);
-  int Recv(void* buf, int len);
+  int Send(const uint8_t* buf, int len);
+  int Recv(uint8_t* buf, int len);
 
   void OnRead();
   void OnWrite();

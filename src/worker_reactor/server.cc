@@ -1,8 +1,8 @@
 /*************************************************************************
-  > File Name: main.cc
+  > File Name: server.cc
   > Author: baoshan
   > Mail: baoshanw@foxmail.com 
-  > Created Time: 2020年04月22日 星期三 18时55分15秒
+  > Created Time: 2020年05月02日 星期六 16时55分12秒
  ************************************************************************/
 
 #include <stdio.h>
@@ -10,13 +10,51 @@
 #include <sys/types.h>
 #include <memory>
 
-#include "src/socket.h"
-#include "src/dispatcher.h"
+#include "src/worker_reactor/socket.h"
+#include "src/worker_reactor/dispatcher.h"
 #include "src/types.h"
 #include "src/utils.h"
 #include "src/macro.h"
-#include "src/conn.h"
-#include "src/conn_manager.h"
+#include "src/worker_reactor/conn.h"
+#include "src/worker_reactor/conn_manager.h"
+#include "src/worker_reactor/thread_pool.h"
+
+class SimpleResponse : public Response {
+ public:
+  SimpleResponse(SOCKET socket_fd, std::string content) : Response(socket_fd), content_(content) {}
+  // 返回一个对象的内部成员的常量指针
+  // void*返回值是考虑到多态,不同的Response实现其封装的content也
+  // 不同
+  void* get_content() const override { return (void*)(content_.c_str()); }
+
+  DISALLOW_COPY_AND_ASSIGN(SimpleResponse);
+
+ private:
+  std::string content_;
+};
+
+std::shared_ptr<Response> SellFruit(std::shared_ptr<RequestTaskData> data) {
+  //printf("sell %s\n", name.c_str());
+  std::shared_ptr<SimpleResponse> response = std::make_shared<SimpleResponse>(data->get_socketfd(), data->get_request());
+  return response;
+}
+
+class RequestTask : public Task {
+ public:
+  //构造函数中需要SellType,隐含外部传进的参数被定义为此类型,因此定义为public
+  typedef std::shared_ptr<Response> (*RequestHandle)(std::shared_ptr<RequestTaskData>); 
+
+  RequestTask(RequestHandle request_handle, std::shared_ptr<RequestTaskData> data) : request_handle_(request_handle), data_(data) {}
+  std::shared_ptr<Response> Run() override { 
+    std::shared_ptr<Response> result = request_handle_(data_); //TODO: 当改造成智能指针
+    return result;
+  }
+
+ private:
+  RequestHandle request_handle_;
+  std::shared_ptr<RequestTaskData> data_;
+};
+
 
 class ServerConn : public Conn {
  public:
@@ -25,12 +63,6 @@ class ServerConn : public Conn {
   void OnRead() override;
   void OnClose() override;
   DISALLOW_COPY_AND_ASSIGN(ServerConn);
-
- private:
-  void HandleRequest() override { 
-    printf("server handle request\n"); 
-  }
-  void HandleResponse() override {}
 };
 
 // 通过socket接收消息
@@ -40,7 +72,7 @@ void ServerConn::OnRead() {
   if (!socket)
     return;
   //printf("youyouyou onread\n");
-  char temp[MAX_SOCKET_BUF_SIZE];
+  uint8_t temp[MAX_SOCKET_BUF_SIZE];
   while (true) {
     memset(temp, 0, MAX_SOCKET_BUF_SIZE);
     // ret不一定等于期望读取的字节数
@@ -51,44 +83,28 @@ void ServerConn::OnRead() {
       break;
     in_buffer_->Write(temp, ret); // TODO: temp用nullptr判断不合适
   }
-  // 当只保留打印in_buffer_的printf时,epoll LT和while循环读随机出莫名其妙的错误:
-  // 增加ret的printf后该错误消失,似乎printf会影响程序的运行时表现,太可怕了!
-  //
-  // 明明client只send了一次,而server已经完全接收进in_buffer_,
-  // 但第二次触发OnRead()打印in_buffer_,内容居然是第一次的截短
-  // 后的后半部分;
-  // 从cpu使用率来看,LT一直在占用cpu,频繁的触发onread等条件,
-  // 按理说应该会一直打印才对,就像在server_callback()中的printf
-  // 一样,但奇怪的是并没有一直打印,而只打印2次
-  // accept conn, socket fd=5 from 127.0.0.1:44550
-  // server allowed connection.
-  // recv: hello, server!
-  // all sent: nihao, client
-  // recv: erver!
-  // all sent: nihao, client
-  printf("recv: %s, size: %d\n", in_buffer_->get_buffer(), in_buffer_->get_offset());
 
-  HandleRequest();
-  
-  //int expect_response_size = 40;
-  //char response[expect_response_size];
-  //int ret = in_buffer_->ReadOut(response, expect_response_size);
-  char response[20] = "nihao, client";
-  // 发端发多少,手端收多少
-  // 二者需要约定一条消息的格式,以识别不同消息的边界,因为TCP是基于数据流的,
-  // 组装包(构建消息)和拆包(解析消息)都在应用层的业务逻辑中实现
-  // 从数据流的形式来看,char与unsigned char(bytes)并无区别,'\0'也是一个字节
-  // 只是纯char数组用内置的c字符串函数不好处理,比如您发了一连串的小包,均以
-  // '\0'结尾,收端收到后全存在缓冲区,你怎么用语言提供的字符串处理函数拆包?
-  // c和c++对字符串的分割这么基本的功能都没有提供函数处理
-  // 对web应用,消息基本都是字符串,编程起来用c++该有多麻烦
-  // 虽然字符串的拆包也需要开发者自己来完成,但c++提供的函数实在是不够用
-  // 没有字符串类型,没有utf-8编码支持,std::string也没有提供方便的函数
-  // char数组更是还要分配固定大小的空间来应对可能长短不一的字符串
-  // 还要担心越界
-  printf("response: %s, len: %d\n", response, (int)strlen(response));
-  Send(response, (int)strlen(response));
-  // get data from in_buffer_, service handle, generate response, Send(response, len_of_response)
+  //std::string content((const char*)(in_buffer_->get_buffer()));
+  //printf("recv: %s, size: %d\n", content.c_str(), (int)content.size());
+  //printf("recv: %s, size: %d\n", in_buffer_->get_buffer(), in_buffer_->get_offset());
+
+  int content_len = in_buffer_->get_offset();
+  // 如果是char数组,用于接收的数组长度必须+1
+  uint8_t request_buf[content_len + 1];
+  // 清空内存,准备接收
+  memset(request_buf, 0, sizeof(request_buf));
+  int ret = in_buffer_->ReadOut(request_buf, content_len);
+  //printf("after readout, offset: %d\n", in_buffer_->get_offset());
+  //printf("after readout, buffer: %s\n", in_buffer_->get_buffer());
+
+  std::string request_content((const char*)request_buf);
+  printf("request: %s, size: %d\n", request_content.c_str(), (int)request_content.size());
+  std::shared_ptr<RequestTaskData> task_data = std::make_shared<RequestTaskData>(socket_fd_, request_content);
+  std::shared_ptr<RequestTask> request_task(new RequestTask(SellFruit, task_data));
+
+  Dispatcher& dispatcher = Dispatcher::GetInstance();
+  std::shared_ptr<ThreadPool> thread_pool = dispatcher.get_threadpool();
+  thread_pool->AddTask(request_task);
 }
 
 void ServerConn::OnClose() {
@@ -174,6 +190,6 @@ int main(int argc, char* argv[]) {
 
   Dispatcher& dispatcher = Dispatcher::GetInstance();
   dispatcher.Start();
-
+  // TODO: 脚本测试并发
   return 0;
 }

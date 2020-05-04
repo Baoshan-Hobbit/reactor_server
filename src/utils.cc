@@ -13,14 +13,19 @@
 // len == 用于接收数据的buf的大小
 // 读取的目标: 尽可能的读,要么将buffer_中的数据读完(len >= write_offet_),要么读不完但是将buf填满(len < write_offset_),剩下没读的
 // 下次再读
-int Buffer::ReadOut(char* buf, int len) {
+int Buffer::ReadOut(uint8_t* buf, int len) {
   int read_len = Read(buf, len);
-  memmove(buffer_, buffer_+read_len, write_offset_-read_len);
+  if (read_len == write_offset_) {
+    memset(buffer_, 0, write_offset_);
+  } else {
+    memmove(buffer_, buffer_+read_len, write_offset_-read_len);
+    memset(buffer_+write_offset_-read_len, 0, read_len);
+  }
   write_offset_ -= read_len;
   return read_len;
 }
 
-int Buffer::Read(char* buf, int len) {
+int Buffer::Read(uint8_t* buf, int len) {
   if (len > write_offset_)
     len = write_offset_;
   //strncpy(buf, buffer_, len);
@@ -33,7 +38,7 @@ int Buffer::Read(char* buf, int len) {
 // len == 要写入的data的字节数
 // 写入的目标: 必须写完,即必须将data完全写入buffer_中
 // 若len <= avail,正常写入,若len > avail,扩容后写入
-int Buffer::Write(const char* data, int len) {
+int Buffer::Write(const uint8_t* data, int len) {
   if (data) {
     int avail = capacity_ - write_offset_;
     if (len > avail)
@@ -47,7 +52,7 @@ int Buffer::Write(const char* data, int len) {
 
 void Buffer::Expand(int size) {
   capacity_ += (size + size / 4);
-  char* new_buffer = new char[capacity_];
+  uint8_t* new_buffer = new uint8_t[capacity_];
   memcpy(new_buffer, buffer_, write_offset_);
   delete[] buffer_;
   buffer_ = new_buffer;

@@ -10,7 +10,7 @@
 
 #include <map>
 #include <memory>
-#include "src/conn.h"
+#include "src/simple_reactor/conn.h"
 #include "src/types.h"
 #include "src/macro.h"
 

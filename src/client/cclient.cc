@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <memory>
+#include <string>
 
 #include "src/utils.h"
 #include "src/types.h"
@@ -32,7 +33,7 @@ class CClient {
   void SetAddr(sockaddr_in* addr, const IP& server_ip, PORT server_port);
 
   // 收到响应后的业务处理逻辑
-  void HandleResponse() { 
+  void HandleResponse(const std::string& response) { 
     printf("client handle response\n"); 
   }
 
@@ -40,11 +41,9 @@ class CClient {
   SOCKET socket_fd_;
   int buf_capacity_;
   std::unique_ptr<Buffer> in_buffer_;
-  std::unique_ptr<Buffer> out_buffer_;
 };
 
 CClient::CClient(int buf_capacity) : in_buffer_(new Buffer(buf_capacity)), 
-                                     out_buffer_(new Buffer(buf_capacity)),
                                      buf_capacity_(buf_capacity) {}
 
 int CClient::Connect(const IP& server_ip, PORT server_port) {
@@ -91,18 +90,26 @@ void CClient::Start() {
 
 void CClient::Recv() {
   // Recv()只负责往in_buffer_写,至于从中取数据去处理,区分数据需要由业务层实现
-  char recv_buf[MAX_SOCKET_BUF_SIZE];
+  uint8_t recv_buf[MAX_SOCKET_BUF_SIZE];
   while (true) {
+    // 读完就返回,所以每次读最多只读MAX_SOCKET_BUF_SIZE字节
     int ret = read(socket_fd_, recv_buf, MAX_SOCKET_BUF_SIZE);
     if (ret == SOCKET_ERROR || ret == 0)
       break;
     in_buffer_->Write(recv_buf, ret);
 
-    if (in_buffer_->get_offset() > 0)
-      printf("recv: %s, size: %d\n", in_buffer_->get_buffer(), 
-          in_buffer_->get_offset());
+    int content_len = in_buffer_->get_offset();
+    if (content_len == 0)
+      return;
 
-    HandleResponse();
+    uint8_t response_buf[content_len + 1];
+    memset(response_buf, 0, sizeof(response_buf));
+    ret = in_buffer_->ReadOut(response_buf, content_len);
+
+    std::string response_content((const char*)response_buf);
+    printf("response: %s, size: %d\n", response_content.c_str(), (int)response_content.size());
+
+    HandleResponse(response_content);
   }
 }
 
@@ -128,9 +135,10 @@ void CClient::Send() {
     char* result = fgets(request, sizeof(request), stdin);
     if (!result)
       return;
-    char send_buf[MAX_SOCKET_BUF_SIZE];
     int offset = 0;
+    // 不发送\n
     int remain = (int)strlen(request) - 1;
+    // 发送完毕或写入socket失败则返回
     while (remain > 0) {
       int send_size = remain;
       if (send_size > MAX_SOCKET_BUF_SIZE)

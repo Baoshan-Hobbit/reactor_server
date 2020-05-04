@@ -5,9 +5,9 @@
   > Created Time: 2020年04月30日 星期四 10时53分40秒
  ************************************************************************/
 
-#include "src/conn_manager.h"
+#include "src/simple_reactor/conn_manager.h"
 #include <memory>
-#include "src/conn.h"
+#include "src/simple_reactor/conn.h"
 #include "src/types.h"
 
 ConnManager& ConnManager::GetInstance() {

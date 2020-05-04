@@ -9,16 +9,17 @@
 #define REACTOR_SERVER_CONN_H_
 
 #include <memory>
+#include <string>
 #include "src/types.h"
 #include "src/utils.h"
-#include "src/socket.h"
+#include "src/simple_reactor/socket.h"
 
 std::shared_ptr<Socket> GetSocket(SOCKET socket_fd);
 
 class Conn {
  public:
   virtual ~Conn() {} 
-  int Send(const char* data, int len);
+  int Send(const uint8_t* data, int len);
   void OnWrite();
   virtual void OnRead() = 0;
   virtual void OnClose() = 0;
@@ -28,8 +29,8 @@ class Conn {
                                 in_buffer_(new Buffer(buf_capacity)), 
                                 out_buffer_(new Buffer(buf_capacity)), 
                                 is_busy_(false) {}
-  virtual void HandleRequest() = 0;
-  virtual void HandleResponse() = 0;
+  virtual void HandleRequest(const std::string& request) = 0;
+  virtual void HandleResponse(const std::string& response) = 0;
 
  protected:
   SOCKET socket_fd_;
