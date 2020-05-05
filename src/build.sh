@@ -7,4 +7,4 @@
 
 #!/bin/sh
 
-g++ -std=c++11 -I /media/wbs/work/reactor_server -pthread test.cc utils.cc worker_reactor/thread_pool.cc -o ../bin/test
+g++ -g -std=c++11 -I /media/wbs/work/reactor_server -pthread test.cc utils.cc worker_reactor/thread_pool.cc -o ../bin/test

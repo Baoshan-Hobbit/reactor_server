@@ -17,6 +17,7 @@
 #include "src/types.h"
 #include "src/macro.h"
 
+// Response基类,不同的业务类型可能返回不同的content,如字符串,图片,文件等
 class Response {
  public:
   virtual ~Response() {}
@@ -31,38 +32,10 @@ class Response {
   SOCKET socket_fd_;
 };
 
-class TextResponse : public Response {
- public:
-  TextResponse(std::string content) : content_(content) {}
-  void* get_content() const override{ return (void*)(content_.c_str()); }
-  DISALLOW_COPY_AND_ASSIGN(TextResponse);
-
- private:
-  std::string content_;
-};
-
-std::shared_ptr<Response> SellFruit(const std::string& name);
-
 class Task {
  public:
   virtual ~Task() {}
   virtual std::shared_ptr<Response> Run() = 0;
-};
-
-class SellTask : public Task {
- public:
-  //构造函数中需要SellType,隐含外部传进的参数被定义为此类型,因此定义为public
-  typedef std::shared_ptr<Response> (*SellType)(const std::string&); 
-
-  SellTask(SellType sell, const std::string& data) : sell_(sell), data_(data) {}
-  std::shared_ptr<Response> Run() override { 
-    std::shared_ptr<Response> result = sell_(data_); //TODO: 当改造成智能指针
-    return result;
-  }
-
- private:
-  std::string data_;
-  SellType sell_;
 };
 
 class ThreadPool {

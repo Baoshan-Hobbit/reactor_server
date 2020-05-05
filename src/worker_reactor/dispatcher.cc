@@ -21,7 +21,7 @@
 Dispatcher& Dispatcher::GetInstance() {
   int event_num = 1024;
   uint32_t wait_timeout = 10;
-  int threadpool_size = 3;
+  int threadpool_size = 8;
   static Dispatcher dispatcher(event_num, wait_timeout, threadpool_size);
   return dispatcher;
 }
@@ -85,18 +85,20 @@ void Dispatcher::Start() {
 void Dispatcher::CheckLoop() {
   std::shared_ptr<Response> response(nullptr);
   while (response = thread_pool_->GetResponse()) {
-    printf("get response: %s\n", (const char*)(response->get_content()));
+    //printf("get response: %s\n", (const char*)(response->get_content()));
     SOCKET socket_fd = response->get_socketfd();
     ConnManager& conn_manager = ConnManager::GetInstance();
     std::shared_ptr<Conn> conn = conn_manager.FindConn(socket_fd);
     if (conn) {
       // TODO: 这里应当使用uint8_t,只是返回的content应当包含其自身的字节数,
       // 涉及到包体的设计,这里简化处理,认为是字符串类型
-      const char* response_content = (const char*)(response->get_content());
+      int response_size = conn->GetResponseSize(response->get_content());
+      //const char* response_content = (const char*)(response->get_content());
       //std::string data(response_content);
       //conn->WriteOutBuffer((uint8_t*)data.c_str(), data.size());
-      printf("send response: %s\n", response_content);
-      conn->Send((uint8_t*)response_content, strlen(response_content));
+      //printf("send response: %s\n", (const char*)response->get_content());
+      //conn->Send((uint8_t*)response_content, strlen(response_content));
+      conn->Send((uint8_t*)(response->get_content()), response_size);
     }
   }  
 }

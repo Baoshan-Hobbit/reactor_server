@@ -30,8 +30,8 @@ void* ThreadPool::Run(void* arg) {
         (unsigned int)tid);
     pthread_mutex_unlock(&mutex_);
     std::shared_ptr<Response> response = task->Run();
+    //sleep(rand() % 5); // 便于观察,debug用
     ptr->AddResponse(response);
-    sleep(rand() % 3); // 便于观察,debug用
   }
 }
 

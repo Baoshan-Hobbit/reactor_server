@@ -29,7 +29,9 @@ class Dispatcher {
   void RegisterSocket(SOCKET socket_fd, std::shared_ptr<Socket> socket);
   void UnregisterSocket(SOCKET socket_fd);
   std::shared_ptr<Socket> FindSocket(SOCKET socket_fd);
-  std::shared_ptr<ThreadPool> get_threadpool() { return thread_pool_; }
+  void PutTaskToThreadpool(std::shared_ptr<Task> task) {
+    thread_pool_->AddTask(task);
+  }
 
   DISALLOW_COPY_AND_ASSIGN(Dispatcher);
 

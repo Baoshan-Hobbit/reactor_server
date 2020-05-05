@@ -19,9 +19,33 @@
 #include "src/worker_reactor/conn_manager.h"
 #include "src/worker_reactor/thread_pool.h"
 
+
+/* 总结: 业务逻辑需要实现的部分: 
+ * 1. requestTaskData, Response的包结构
+ * 2. 处理具体请求的函数
+ * 3. 对具体Task的实现,包含处理请求的函数成员和requestTaskData
+ * 4. 拆包
+ * 5. 组装包
+ */
+
+// 对RequstTaskData类的业务实现,包含socket_fd和request字符串
+class RequestTaskData {
+ public:
+  RequestTaskData(SOCKET socket_fd, const std::string& request): 
+    socket_fd_(socket_fd), request_(request) {}
+  SOCKET get_socketfd() { return socket_fd_; }
+  std::string get_request() const { return request_; }
+
+ private:
+  SOCKET socket_fd_;
+  std::string request_;
+};
+
+// 对Response类的业务实现
 class SimpleResponse : public Response {
  public:
-  SimpleResponse(SOCKET socket_fd, std::string content) : Response(socket_fd), content_(content) {}
+  SimpleResponse(SOCKET socket_fd, std::string content) : Response(socket_fd), 
+                                                          content_(content) {}
   // 返回一个对象的内部成员的常量指针
   // void*返回值是考虑到多态,不同的Response实现其封装的content也
   // 不同
@@ -33,18 +57,24 @@ class SimpleResponse : public Response {
   std::string content_;
 };
 
+// 对Task中的处理函数的业务实现
 std::shared_ptr<Response> SellFruit(std::shared_ptr<RequestTaskData> data) {
   //printf("sell %s\n", name.c_str());
-  std::shared_ptr<SimpleResponse> response = std::make_shared<SimpleResponse>(data->get_socketfd(), data->get_request());
+  std::shared_ptr<SimpleResponse> response = std::make_shared<SimpleResponse>(
+      data->get_socketfd(), data->get_request());
   return response;
 }
 
+// 对RequestTask的业务实现,包含task的处理函数,待处理的请求数据
 class RequestTask : public Task {
  public:
   //构造函数中需要SellType,隐含外部传进的参数被定义为此类型,因此定义为public
-  typedef std::shared_ptr<Response> (*RequestHandle)(std::shared_ptr<RequestTaskData>); 
+  typedef std::shared_ptr<Response> (*RequestHandle)(
+      std::shared_ptr<RequestTaskData>); 
 
-  RequestTask(RequestHandle request_handle, std::shared_ptr<RequestTaskData> data) : request_handle_(request_handle), data_(data) {}
+  RequestTask(RequestHandle request_handle, 
+              std::shared_ptr<RequestTaskData> data) : 
+    request_handle_(request_handle), data_(data) {}
   std::shared_ptr<Response> Run() override { 
     std::shared_ptr<Response> result = request_handle_(data_); //TODO: 当改造成智能指针
     return result;
@@ -55,13 +85,13 @@ class RequestTask : public Task {
   std::shared_ptr<RequestTaskData> data_;
 };
 
-
 class ServerConn : public Conn {
  public:
   ServerConn(int buf_capacity, SOCKET socket_fd): 
      Conn(buf_capacity, socket_fd) {}
   void OnRead() override;
   void OnClose() override;
+  int GetResponseSize(void* response) override;
   DISALLOW_COPY_AND_ASSIGN(ServerConn);
 };
 
@@ -83,12 +113,11 @@ void ServerConn::OnRead() {
       break;
     in_buffer_->Write(temp, ret); // TODO: temp用nullptr判断不合适
   }
-
-  //std::string content((const char*)(in_buffer_->get_buffer()));
-  //printf("recv: %s, size: %d\n", content.c_str(), (int)content.size());
-  //printf("recv: %s, size: %d\n", in_buffer_->get_buffer(), in_buffer_->get_offset());
-
+ 
+  // 拆包的业务逻辑
   int content_len = in_buffer_->get_offset();
+  if (content_len == 0)
+    return;
   // 如果是char数组,用于接收的数组长度必须+1
   uint8_t request_buf[content_len + 1];
   // 清空内存,准备接收
@@ -96,15 +125,17 @@ void ServerConn::OnRead() {
   int ret = in_buffer_->ReadOut(request_buf, content_len);
   //printf("after readout, offset: %d\n", in_buffer_->get_offset());
   //printf("after readout, buffer: %s\n", in_buffer_->get_buffer());
-
   std::string request_content((const char*)request_buf);
-  printf("request: %s, size: %d\n", request_content.c_str(), (int)request_content.size());
+  //printf("request: %s, size: %d\n", request_content.c_str(), (int)request_content.size());
+
+  // 将读取到的请求数据封装成task的业务逻辑
   std::shared_ptr<RequestTaskData> task_data = std::make_shared<RequestTaskData>(socket_fd_, request_content);
   std::shared_ptr<RequestTask> request_task(new RequestTask(SellFruit, task_data));
-
+  
+  // 将task递交给thread_pool
   Dispatcher& dispatcher = Dispatcher::GetInstance();
-  std::shared_ptr<ThreadPool> thread_pool = dispatcher.get_threadpool();
-  thread_pool->AddTask(request_task);
+  dispatcher.PutTaskToThreadpool(request_task);
+  printf("server handle conn socket: %d\n", socket_fd_);
 }
 
 void ServerConn::OnClose() {
@@ -121,6 +152,10 @@ void ServerConn::OnClose() {
     //printf("socket not found in serverconn\n");
   //}
 }
+
+int ServerConn::GetResponseSize(void* response) {
+  return strlen((const char*)response);
+} 
 
 void ConnCallback(void* callback_data, SOCKET socket_fd, MSG_TYPE type) {
   ConnManager& conn_manager = ConnManager::GetInstance();

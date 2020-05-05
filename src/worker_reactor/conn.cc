@@ -45,7 +45,7 @@ int Conn::Send(const uint8_t* data, int len) {
     out_buffer_->Write(data + offset, remain);
     printf("remain %d bytes, write to buffer.\n", remain);
   } else {
-    printf("all sent\n");
+    //printf("all sent\n");
   }
   return len;
 }

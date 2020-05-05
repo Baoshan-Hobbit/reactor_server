@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <memory>
 #include <string>
@@ -29,7 +30,7 @@ class ServerConn : public Conn {
 
  private:
   void HandleRequest(const std::string& request) override { 
-    printf("server handle request\n"); 
+    printf("server handle request of conn socket: %d\n", socket_fd_); 
   }
   void HandleResponse(const std::string& response) override {}
 };
@@ -76,9 +77,10 @@ void ServerConn::OnRead() {
   int ret = in_buffer_->ReadOut(request_buf, content_len);
 
   std::string request_content((const char*)request_buf);
-  printf("request: %s, size: %d\n", request_content.c_str(), (int)request_content.size());
+  //printf("request: %s, size: %d\n", request_content.c_str(), (int)request_content.size());
 
   HandleRequest(request_content);
+  //sleep(1);
   
   //int expect_response_size = 40;
   //char response[expect_response_size];
@@ -96,7 +98,7 @@ void ServerConn::OnRead() {
   // 没有字符串类型,没有utf-8编码支持,std::string也没有提供方便的函数
   // char数组更是还要分配固定大小的空间来应对可能长短不一的字符串
   // 还要担心越界
-  printf("response: %s, len: %d\n", response, (int)strlen(response));
+  //printf("response: %s, len: %d\n", response, (int)strlen(response));
   Send((uint8_t*)response, (int)strlen(response));
   // get data from in_buffer_, service handle, generate response, Send(response, len_of_response)
 }
@@ -184,6 +186,7 @@ int main(int argc, char* argv[]) {
 
   Dispatcher& dispatcher = Dispatcher::GetInstance();
   dispatcher.Start();
+  printf("abnormal exit.\n");
 
   return 0;
 }

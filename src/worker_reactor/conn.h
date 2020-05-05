@@ -25,6 +25,7 @@ class Conn {
   }
   virtual void OnRead() = 0;
   virtual void OnClose() = 0;
+  virtual int GetResponseSize(void* response) = 0;
 
  protected:
   Conn(int buf_capacity, SOCKET socket_fd) : socket_fd_(socket_fd),

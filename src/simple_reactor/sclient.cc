@@ -33,6 +33,10 @@ class ClientConn : public Conn {
   }
   void HandleResponse(const std::string& response) override { 
       printf("sclient handle response, maybe transfer response\n"); 
+
+      char request[32] = "client send test request";
+      printf("request len: %d\n", (int)strlen(request));
+      Send((uint8_t*)request, strlen(request));  
   }
 };
 
@@ -145,7 +149,7 @@ void ConnectCallback(void* callback_data, SOCKET socket_fd, MSG_TYPE type) {
     printf("client connected to server.\n");
 
     // connect成功后发送request不必须
-    char request[2048] = "zzzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozzhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguozhongguohongguo";
+    char request[32] = "client send test request";
     printf("request len: %d\n", (int)strlen(request));
     client_conn->Send((uint8_t*)request, strlen(request));  
   } else if (type == NETLIB_MSG_CLOSE) {

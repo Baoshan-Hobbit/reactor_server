@@ -72,15 +72,4 @@ class Buffer {
 
 const int MAX_SOCKET_BUF_SIZE = 8;
 
-class RequestTaskData {
- public:
-  RequestTaskData(SOCKET socket_fd, const std::string& request): socket_fd_(socket_fd), request_(request) {}
-  SOCKET get_socketfd() { return socket_fd_; }
-  std::string get_request() const { return request_; }
-
- private:
-  SOCKET socket_fd_;
-  std::string request_;
-};
-
 #endif // REACTOR_SERVER_UTILS_H_
